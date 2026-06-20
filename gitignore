@@ -1,0 +1,65 @@
+# ============================================================================
+# ovsbMicroKernelMac (MkM) - Git Ignore
+# ============================================================================
+
+# Build artifacts
+build/
+*.o
+*.elf
+*.iso
+*.img
+*.bin
+
+# Compilador/Assembler
+*.lst              # Listagens NASM
+*.sym              # Símbolos
+*.map              # Map files
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.cproject
+.settings/
+
+# IDEs
+*.sublime-workspace
+*.sublime-project
+CMakeUserPresets.json
+
+# Debugger
+.gdb_history
+.lldb_history
+
+# Logs
+*.log
+serial.log
+qemu.log
+
+# Temporários
+*.tmp
+*.bak
+*backup*
+
+# OS
+.DS_Store
+Thumbs.db
+*.exe
+
+# Python (para ferramentas)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+
+# Outros
+.git/
+.gitignore
+*.patch
+*.diff
