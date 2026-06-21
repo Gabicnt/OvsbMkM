@@ -1,12 +1,12 @@
 bits 32
+
 section .multiboot
 align 8
-header_start:
+multiboot_header:
     dd 0xE85250D6
     dd 0
-    dd header_end - header_start
-    dd -(0xE85250D6 + 0 + (header_end - header_start))
-    dw 5, 0, 20, 1024, 768, 32
+    dd header_end - multiboot_header
+    dd -(0xE85250D6 + 0 + (header_end - multiboot_header))
     dw 0, 0, 8
 header_end:
 
@@ -16,26 +16,36 @@ extern kmain
 
 _start:
     mov esp, stack_top
-    mov edi, eax
-    mov esi, ebx
-    lgdt [gdt64.pointer]
+
+    ; 1. PAE
     mov eax, cr4
-    or eax, 0x20
+    or eax, 1 << 5
     mov cr4, eax
+
+    ; 2. PML4
     mov eax, pml4_table
     mov cr3, eax
+
+    ; 3. Long Mode
     mov ecx, 0xC0000080
     rdmsr
-    or eax, 0x100
+    or eax, 1 << 8
     wrmsr
+
+    ; 4. Paging + Protected Mode
     mov eax, cr0
     or eax, 0x80000001
     mov cr0, eax
-    jmp gdt64.code:_start64
+
+    ; 5. Carregar GDT 64-bit
+    lgdt [gdt64_ptr]
+
+    ; 6. Far jump para 64-bit
+    jmp 0x08:start64
 
 bits 64
-_start64:
-    mov ax, gdt64.data
+start64:
+    mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
@@ -50,14 +60,13 @@ section .data
 align 16
 gdt64:
     dq 0
-.code: equ $ - gdt64
-    dq (1<<43) | (1<<44) | (1<<47) | (1<<53)
-.data: equ $ - gdt64
-    dq (1<<44) | (1<<47) | (1<<53)
-.pointer:
+    dq 0x0020980000000000   ; code 64-bit
+    dq 0x0000920000000000   ; data
+gdt64_ptr:
     dw $ - gdt64 - 1
     dq gdt64
 
+section .paging
 align 4096
 pml4_table:
     dq pdp_table + 3

@@ -1,47 +1,41 @@
+```markdown
 % ============================================================================
-% ovsbMicroKernelMac (MkM) - SAÍDA ESPERADA
+% ovsbMicroKernelMac (MkM) - SAÍDA ESPERADA (ATUALIZADO)
 % ============================================================================
 % Arquivo: docs/EXPECTED_OUTPUT.md
 % Descrição: Screenshots e exemplos de saída terminal esperada
+% Versão: 2.0 — 64-bit com GRUB + Multiboot2
 % ============================================================================
 
-# Saída Esperada - Terminal MkM Fase 1
+# Saída Esperada - Terminal MkM Fase 1 (64-bit)
 
-Este documento mostra exatamente o que você deve ver ao executar o kernel.
+Este documento mostra exatamente o que você deve ver ao executar o kernel 64-bit.
 
 ---
 
 ## 🎯 Inicialização
 
-### Ao Executar `make run` ou Script
+### Ao Executar `./build.sh && ./run.sh`
 
-**Terminal output (primeiros 2 segundos):**
+**Terminal output (durante compilação):**
 
 ```
-[MkM] Compilando kernel MkM...
-[MkM] Kernel compilado com sucesso!
-[MkM] Iniciando QEMU...
+[1/4] Compilando bootloader...
+[2/4] Compilando kernel...
+[3/4] Linkando...
+[4/4] Criando ISO...
 
-=========================================
-ovsbMicroKernelMac (MkM) Fase 1
-=========================================
-
-Kernel: build/kernel.elf
-Memória: 256 MB
-
-Comandos disponíveis:
-  help, clear, echo, about, shutdown
-
-Para sair do QEMU: Ctrl+A, depois X
-=========================================
-
+PRONTO! ISO criada: OvsbMkM.iso
+Execute: ./run.sh
 ```
 
 **Dentro do QEMU (na janela):**
 
 ```
-MkM MicroKernel v0.1.0 Terminal inicializado. Digite 'help' para comandos.
-MkM > █
+OvsbMkM 64-bit Terminal v3.0
+Digite 'help'
+
+MkM> █
 ```
 
 O cursor piscará depois de `>`. Se vir isso, **kernel está funcional!** ✅
@@ -54,21 +48,16 @@ O cursor piscará depois de `>`. Se vir isso, **kernel está funcional!** ✅
 
 **Input:**
 ```
-MkM > help
+MkM> help
 ```
 
 **Output esperada:**
 ```
-Comandos disponiveis:
-  help   - Mostra esta ajuda
-  clear  - Limpa a tela
-  echo   - Repete o texto digitado
-  about  - Sobre o MkM
-  shutdown - Desliga o sistema
-MkM > 
+help, clear, echo, about, shutdown
+MkM> 
 ```
 
-**O que vira:** Lista formatada com 5 comandos disponíveis, depois novo prompt.
+**O que vira:** Lista de comandos em uma linha, depois novo prompt.
 
 ---
 
@@ -78,55 +67,42 @@ MkM >
 
 **Input:**
 ```
-MkM > echo Ola Mundo!
+MkM> echo Ola Mundo!
 ```
 
 **Output esperada:**
 ```
 Ola Mundo!
-MkM > 
+MkM> 
 ```
 
 #### Exemplo 2: Múltiplas palavras
 
 **Input:**
 ```
-MkM > echo O MkM eh incrivel
+MkM> echo O MkM eh 64-bit
 ```
 
 **Output esperada:**
 ```
-O MkM eh incrivel
-MkM > 
+O MkM eh 64-bit
+MkM> 
 ```
 
 #### Exemplo 3: Sem argumentos
 
 **Input:**
 ```
-MkM > echo
+MkM> echo
 ```
 
 **Output esperada:**
 ```
 
-MkM > 
+MkM> 
 ```
 
 (Nada impresso, apenas nova linha)
-
-#### Exemplo 4: Com números
-
-**Input:**
-```
-MkM > echo 12345
-```
-
-**Output esperada:**
-```
-12345
-MkM > 
-```
 
 ---
 
@@ -134,23 +110,15 @@ MkM >
 
 **Input:**
 ```
-MkM > about
+MkM> about
 ```
 
 **Output esperada:**
 ```
-ovsbMicroKernelMac (MkM) v0.1.0
-Microkernel para executar binarios macOS
-Alvo: High Sierra x86-64
-Feito do zero, sem XNU
-
-Arquitetura: 64-bit x86-64
-Boot: Multiboot2
-Fase: 1 (Terminal Interativo)
-MkM > 
+OvsbMkM 64-bit
+Microkernel macOS High Sierra
+MkM> 
 ```
-
-**Nota:** Exibe informações completas sobre o projeto em 7 linhas.
 
 ---
 
@@ -158,20 +126,14 @@ MkM >
 
 **Antes:**
 ```
-MkM > clear
-MkM > help
-Comandos disponiveis:
-  help   - Mostra esta ajuda
-  clear  - Limpa a tela
-  echo   - Repete o texto digitado
-  about  - Sobre o MkM
-  shutdown - Desliga o sistema
-MkM > _
+MkM> help
+help, clear, echo, about, shutdown
+MkM> 
 ```
 
 **Depois de `clear`:**
 ```
-MkM > 
+MkM> 
 ```
 
 A tela fica completamente vazia. Cursor volta ao topo esquerdo.
@@ -182,16 +144,15 @@ A tela fica completamente vazia. Cursor volta ao topo esquerdo.
 
 **Input:**
 ```
-MkM > shutdown
+MkM> shutdown
 ```
 
 **Output esperada:**
 ```
-
 Desligando...
 ```
 
-Depois de 1 segundo, QEMU fecha e retorna ao terminal host.
+A CPU para (`cli; hlt`). O QEMU **não fecha automaticamente** — pressione `Ctrl+Alt+Q` ou feche a janela para sair.
 
 ---
 
@@ -199,24 +160,13 @@ Depois de 1 segundo, QEMU fecha e retorna ao terminal host.
 
 **Input:**
 ```
-MkM > xyz
+MkM> xyz
 ```
 
 **Output esperada:**
 ```
-Comando nao encontrado: xyz
-MkM > 
-```
-
-**Input:**
-```
-MkM > foobar arg1 arg2
-```
-
-**Output esperada:**
-```
-Comando nao encontrado: foobar
-MkM > 
+? xyz
+MkM> 
 ```
 
 ---
@@ -230,15 +180,15 @@ MkM >
 **Aparência na tela:**
 
 ```
-MkM > e
-MkM > ec
-MkM > ech
-MkM > echo
-MkM > echo 
-MkM > echo t
-MkM > echo te
-MkM > echo tes
-MkM > echo test
+MkM> e
+MkM> ec
+MkM> ech
+MkM> echo
+MkM> echo 
+MkM> echo t
+MkM> echo te
+MkM> echo tes
+MkM> echo test
 ```
 
 Cada caractere aparece imediatamente após digitar.
@@ -250,14 +200,14 @@ Cada caractere aparece imediatamente após digitar.
 **Aparência:**
 
 ```
-MkM > echo test████
-MkM > echo tes
-MkM > echo te
-MkM > echo t
-MkM > echo 
+MkM> echo test
+MkM> echo tes
+MkM> echo te
+MkM> echo t
+MkM> echo 
 ```
 
-Cada backspace remove um caractere (mostra `\b \b` na tela).
+Cada backspace remove um caractere.
 
 ### Enter
 
@@ -266,41 +216,12 @@ Cada backspace remove um caractere (mostra `\b \b` na tela).
 **Aparência:**
 
 ```
-MkM > help█
-[Enter]
-Comandos disponiveis:
-  help   - Mostra esta ajuda
-  ...
-MkM > 
+MkM> help
+help, clear, echo, about, shutdown
+MkM> 
 ```
 
 Comando é executado, nova linha, novo prompt.
-
-### Shift + Caracteres
-
-**Input:** Tipo `HELLO` (com Caps Lock ou Shift)
-
-**Aparência:**
-
-```
-MkM > HELLO
-test output here
-MkM > 
-```
-
-Letras maiúsculas aparecem normalmente.
-
-**Input:** Digite `!@#$%` (Shift + números)
-
-**Aparência:**
-
-```
-MkM > echo !@#$%
-!@#$%
-MkM > 
-```
-
-Símbolos aparecem corretamente.
 
 ---
 
@@ -309,44 +230,28 @@ Símbolos aparecem corretamente.
 Fluxo típico de uso:
 
 ```
-MkM MicroKernel v0.1.0 Terminal inicializado. Digite 'help' para comandos.
+OvsbMkM 64-bit Terminal v3.0
+Digite 'help'
 
-MkM > help
-Comandos disponiveis:
-  help   - Mostra esta ajuda
-  clear  - Limpa a tela
-  echo   - Repete o texto digitado
-  about  - Sobre o MkM
-  shutdown - Desliga o sistema
+MkM> help
+help, clear, echo, about, shutdown
 
-MkM > about
-ovsbMicroKernelMac (MkM) v0.1.0
-Microkernel para executar binarios macOS
-Alvo: High Sierra x86-64
-Feito do zero, sem XNU
+MkM> about
+OvsbMkM 64-bit
+Microkernel macOS High Sierra
 
-Arquitetura: 64-bit x86-64
-Boot: Multiboot2
-Fase: 1 (Terminal Interativo)
+MkM> echo Teste do MkM 64-bit!
+Teste do MkM 64-bit!
 
-MkM > echo Teste do MkM funciona!
-Teste do MkM funciona!
+MkM> xyz
+? xyz
 
-MkM > echo Vamos tentar algo mais longo
-Vamos tentar algo mais longo
-
-MkM > xyz
-Comando nao encontrado: xyz
-
-MkM > clear
+MkM> clear
 [Tela limpa]
 
-MkM > 
-
-MkM > shutdown
-
+MkM> shutdown
 Desligando...
-[QEMU fecha após 1 segundo]
+[CPU para — feche o QEMU manualmente]
 ```
 
 ---
@@ -355,52 +260,34 @@ Desligando...
 
 ### Cores
 
-- **Fundo:** Preto absoluto (`#000000`)
-- **Texto:** Verde claro/brilhante (`#00FF00` ou similar)
-- **Cursor:** Retângulo branco piscante (2Hz)
+- **Fundo:** Preto absoluto
+- **Texto:** Verde claro (VGA color 0x0A)
+- **Cursor:** Retângulo verde piscante
 
 ### Fonte
 
 - Tipo: Monospace (VGA padrão)
-- Tamanho: ~8x16 pixels por caractere (depende de QEMU)
 - Resolução: 80 caracteres × 25 linhas
 
 ### Layout
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│MkM MicroKernel v0.1.0 Terminal inicializado. Digite 'help' para comandos.  │
-│MkM > █                                                                     │
-│                                                                            │
-│                                                                            │
-│                                                                            │
-│                         (22 linhas vazias)                                │
-│                                                                            │
+│OvsbMkM 64-bit Terminal v3.0                                                 │
+│Digite 'help'                                                                │
+│                                                                             │
+│MkM> █                                                                       │
+│                                                                             │
+│                         (21 linhas vazias)                                  │
+│                                                                             │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
-
-**Nota:** Linhas 2-25 estão vazias (preenchidas com espaços pretos).
 
 ---
 
 ## 🔄 Scroll
 
-Se digitar muitos `help` seguidos (saída > 23 linhas):
-
-```
-MkM > help
-Comandos disponiveis:
-  help   - Mostra esta ajuda
-  clear  - Limpa a tela
-  ...
-MkM > help
-Comandos disponiveis:
-  help   - Mostra esta ajuda
-  [primeira linha de help anterior desaparece]
-  ...
-```
-
-Tela faz scroll (rola) para cima quando atinge linha 25. Funciona corretamente.
+Se digitar muitos comandos (saída > 23 linhas), a tela rola automaticamente para cima.
 
 ---
 
@@ -408,108 +295,62 @@ Tela faz scroll (rola) para cima quando atinge linha 25. Funciona corretamente.
 
 ### Cenário 1: Tela Preta, Nada Aparece
 
-**Significado:** Kernel provavelmente crashou antes de VGA ser inicializado.
+**Significado:** Kernel crashou antes de inicializar VGA.
 
 **O que fazer:**
-1. Verifique se `make` compilou sem erros
-2. Verifique tamanho de `build/kernel.elf` (deve ser 10-20 KB)
-3. Verifique se QEMU iniciou (deve abrir janela)
-4. Recompile tudo: `make clean all`
+1. Verifique se `boot64.asm` e `kernel.c` compilaram sem erros
+2. Verifique tamanho de `build/kernel.elf` (deve ser ~22 KB)
+3. Execute com `-no-reboot` para ver mensagens de erro
+4. Recompile tudo: `./build.sh`
 
-**Se persistir:** Veja [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+### Cenário 2: "Boot error" ou GRUB não carrega
 
-### Cenário 2: Caracteres Aleatórios ou Lixo
-
-**Significado:** VGA inicializado mas buffer corrompido.
+**Significado:** ISO mal gerada ou kernel não encontrado.
 
 **O que fazer:**
-1. `clear` deve corrigir (telinha fica vazia)
-2. Se não corrigir, problema com VGA buffer
-3. Recompile: `make clean`
+1. Verifique se `iso/boot/kernel.elf` existe
+2. Verifique `iso/boot/grub/grub.cfg` está correto
+3. Regenere a ISO: `grub-mkrescue -o OvsbMkM.iso iso/`
 
-### Cenário 3: Prompt Aparece mas Teclado Não Responde
+### Cenário 3: Prompt aparece mas teclado não responde
 
-**Significado:** VGA OK, mas PS/2 travou.
-
-**O que fazer:**
-1. Tente digitar mesmo assim (às vezes delay)
-2. Presione Ctrl+A, depois X para sair do QEMU
-3. Verifique se driver PS/2 está correto
-4. Veja [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-
-### Cenário 4: Teclado Funciona mas Comandos Aleatórios
-
-**Significado:** PS/2 funciona, parser quebrado.
+**Significado:** Driver PS/2 travou.
 
 **O que fazer:**
-1. Digite `help` — deve listar 5 comandos
-2. Se não funciona, problema em execute_command()
-3. Digite `clear` — deve limpar tela
-4. Recompile e tente novamente
+1. O QEMU emula PS/2 por padrão — deve funcionar
+2. Tente pressionar teclas algumas vezes
+3. Reinicie o QEMU
 
----
+### Cenário 4: "64" apareceu, mas terminal não
 
-## 🎨 Variações Esperadas
+**Significado:** Kernel antigo (teste) ainda na ISO.
 
-Dependendo de QEMU/máquina, pode haver pequenas variações:
-
-### Variação 1: Timing do Prompt
-
-```
-[Mais rápido]
-MkM > █
-
-[Mais lento]
-MkM MicroKernel v0.1.0 Terminal inicializado. Digite 'help' para comandos.
-MkM > █
-```
-
-Ambos são normais. Apenas timing diferente.
-
-### Variação 2: Cursor
-
-Pode aparecer como:
-- Retângulo branco sólido
-- Underscore `_` piscante
-- Barra vertical `|`
-
-Todas são válidas (depende de emulação VGA do QEMU).
-
-### Variação 3: Cores
-
-Se QEMU não emula cores VGA perfeitamente:
-- Verde pode ser ligeiramente diferente
-- Fundo pode não ser 100% preto
-- Ainda é legível
-
-Não é problema do kernel.
+**O que fazer:**
+1. Verifique se `kernel.c` é o arquivo com terminal (não o de teste)
+2. Recompile: `./build.sh`
 
 ---
 
 ## 📋 Checklist de Verificação Visual
 
-Ao executar `make run`, verifique:
-
-- [ ] Janela QEMU abre em ~2 segundos
-- [ ] Fundo é preto (não branco ou cinza)
+- [ ] Janela QEMU abre corretamente
+- [ ] Fundo é preto
 - [ ] Texto é verde claro e legível
-- [ ] Primeira linha é "MkM MicroKernel v0.1.0..."
-- [ ] Segunda linha é "MkM > " com cursor
-- [ ] Cursor pisca (não é estático)
-- [ ] Teclado funciona (letra aparece ao digitar)
+- [ ] Primeira linha: "OvsbMkM 64-bit Terminal v3.0"
+- [ ] Prompt "MkM> " aparece
+- [ ] Teclado funciona (letras aparecem ao digitar)
 - [ ] Backspace apaga caracteres
 - [ ] Enter executa comando
-- [ ] `help` lista 5 comandos
+- [ ] `help` lista comandos
 - [ ] `echo teste` imprime "teste"
-- [ ] `about` mostra 7 linhas de info
-- [ ] `clear` limpa tela completamente
-- [ ] `shutdown` fecha QEMU
-- [ ] Nenhum erro ou crash
+- [ ] `about` mostra informações
+- [ ] `clear` limpa tela
+- [ ] `shutdown` para a CPU
+- [ ] Comando inválido mostra "? comando"
 
-Se todos marcados: **Terminal está 100% correto! ✅**
+Se todos marcados: **Terminal 64-bit está 100% correto! ✅**
 
 ---
 
-**Última atualização:** 2026-06-20
-
-Pronto para começar! 🚀
+**Última atualização:** 2026-06-21 — Terminal 64-bit funcional! 🚀
+```

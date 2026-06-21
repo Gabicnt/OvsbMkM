@@ -1,89 +1,121 @@
-% ============================================================================
-% ovsbMicroKernelMac (MkM) - Guia Técnico Arquitetura Fase 1
-% ============================================================================
-% Arquivo: docs/ARCHITECTURE_PHASE1.md
-% Descrição: Explica em detalhes a arquitetura de boot, drivers e design
-% ============================================================================
+# Arquitetura Técnica - Fase 1 do MkM (v2.0 - Atualizado)
 
-# Arquitetura Técnica - Fase 1 do MkM
+## 1. Fluxo de Boot Completo (ATUAL)
 
-## 1. Fluxo de Boot Completo
-
-### 1.1 QEMU → Kernel (Multiboot2)
+### 1.1 GRUB → Kernel (Multiboot2)
 
 ```
-QEMU inicia com flag: -kernel build/kernel.elf
+QEMU inicia com flag: -cdrom OvsbMkM.iso
         ↓
-QEMU carrega kernel.elf na memória (1MB = 0x100000)
+BIOS/UEFI carrega GRUB da ISO
         ↓
-QEMU busca magic number Multiboot2 (0xE85250D6) nos primeiros 32KB
+GRUB lê grub.cfg e encontra kernel.elf
         ↓
-QEMU valida checksum e tags Multiboot2
+GRUB carrega kernel.elf na memória (1MB = 0x100000)
         ↓
-QEMU seta CPU em modo protegido 32-bit
+GRUB busca magic number Multiboot2 (0xE85250D6) nos primeiros 32KB
         ↓
-QEMU seta ESP (stack pointer) temporário
+GRUB valida checksum e tags Multiboot2
         ↓
-QEMU salta para _start do kernel
+GRUB seta CPU em modo protegido 32-bit
+        ↓
+GRUB salta para _start do kernel
         ↓
 EAX = magic number (0x36D76289)
 EBX = pointer para estrutura multiboot2_info
 ```
 
-### 1.2 Bootloader (boot.asm) — 32-bit
+**Por que GRUB em vez de `-kernel` direto?**
+- `qemu -kernel` exige PVH ELF Note (problemático)
+- GRUB é o bootloader padrão para PCs reais
+- ISO bootável funciona no QEMU e em hardware físico
+- Mesmo processo de desenvolvimento e deploy final
+
+### 1.2 Bootloader (boot64.asm) — Transição 32→64-bit
+
+**Arquivo:** `boot64.asm`
+**Formato:** ELF64 com cabeçalho Multiboot2
 
 O bootloader realiza as seguintes etapas:
 
-#### Etapa 1: Salvamento de Parâmetros
+#### Etapa 1: Multiboot2 Header
 ```asm
-mov r8d, eax    ; Salvar magic
-mov r9d, ebx    ; Salvar mbi pointer
-```
-Feito porque vamos mudar de modo e precisar desses valores.
-
-#### Etapa 2: Configuração de GDT
-
-O bootloader carrega uma GDT mínima com 3 descritores:
-
-```
-GDT[0] = Null descriptor (obrigatório)
-GDT[1] = Code 64-bit (seletor 0x08)
-         - L=1 (Long Mode)
-         - DB=0 (não aplicável em LM)
-         - P=1 (Present)
-         - DPL=0 (Kernel mode)
-         - S=1 (System)
-         - Type=0xA (code, exec-only, readable)
-
-GDT[2] = Data 64-bit (seletor 0x10)
-         - Flags similares, mas Type=0x2 (data, r/w)
+section .multiboot
+align 8
+multiboot_header:
+    dd 0xE85250D6          ; magic Multiboot2
+    dd 0                   ; arch (i386)
+    dd header_end - multiboot_header
+    dd -(0xE85250D6 + 0 + (header_end - multiboot_header))
+    dw 0, 0, 8             ; end tag
+header_end:
 ```
 
-Isso permite que quando entrarmos em long mode, já temos os seletores certos.
-
-#### Etapa 3: Habilitar Bits do Processador
-
+#### Etapa 2: Habilitar PAE (Physical Address Extension)
 ```asm
-; PSE (Page Size Extensions) - não obrigatório, mas bom
 mov eax, cr4
-or eax, 0x10        ; Bit 4 (PSE)
+or eax, 1 << 5            ; Bit 5 (PAE)
 mov cr4, eax
+```
 
-; PAE (Physical Address Extension) - OBRIGATÓRIO para long mode
-mov eax, cr4
-or eax, 0x20        ; Bit 5 (PAE)
-mov cr4, eax
+#### Etapa 3: Carregar PML4 (Page Map Level 4)
+```asm
+mov eax, pml4_table       ; Endereço físico da PML4
+mov cr3, eax              ; CR3 aponta para PML4
+```
 
-; EFER.LME (Long Mode Enable) - OBRIGATÓRIO
-mov ecx, 0xC0000080     ; Endereço MSR EFER
+#### Etapa 4: Habilitar Long Mode (EFER.LME)
+```asm
+mov ecx, 0xC0000080       ; MSR EFER
 rdmsr
-or eax, 0x100           ; Bit 8 (LME)
+or eax, 1 << 8            ; Bit 8 (LME)
 wrmsr
 ```
 
-#### Etapa 4: Configurar Paginação
+#### Etapa 5: Habilitar Paginação + Modo Protegido
+```asm
+mov eax, cr0
+or eax, 0x80000001        ; PG (bit 31) + PE (bit 0)
+mov cr0, eax
+```
 
-A paginação é OBRIGATÓRIA para entrar em long mode. Criamos tabelas mínimas:
+#### Etapa 6: Carregar GDT 64-bit
+```asm
+lgdt [gdt64_ptr]          ; Carrega GDT com descritores 64-bit
+```
+
+#### Etapa 7: Far Jump para 64-bit
+```asm
+jmp 0x08:start64          ; Seletor 0x08 = code 64-bit
+```
+
+#### Etapa 8: Inicialização 64-bit
+```asm
+bits 64
+start64:
+    mov ax, 0x10           ; Seletor de dados
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov rsp, stack_top
+    call kmain             ; Chamar kernel C
+```
+
+### 1.3 Estrutura da GDT 64-bit
+
+```
+GDT[0] = Null descriptor
+GDT[1] = Code 64-bit (seletor 0x08)
+         - 0x0020980000000000
+         - L=1 (Long Mode), P=1, DPL=0, Type=0xA
+GDT[2] = Data 64-bit (seletor 0x10)
+         - 0x0000920000000000
+         - P=1, DPL=0, Type=0x2 (writable)
+```
+
+### 1.4 Tabelas de Paginação
 
 ```
 PML4 (Page Map Level 4) — 512 entradas de 64 bits
@@ -91,436 +123,298 @@ PML4 (Page Map Level 4) — 512 entradas de 64 bits
       └─ PD (Page Directory) — 512 entradas (2MB pages)
 ```
 
-Isso mapeia os primeiros 2GB de RAM (512 × 2MB) como identity mapping (virtual = physical).
+Mapeia os primeiros **1 GB** de RAM (512 × 2MB) como identity mapping.
 
-```asm
-mov eax, pml4_table     ; Carregar PML4
-mov cr3, eax            ; CR3 aponta para PML4
+**Seção dedicada no linker:**
+```ld
+.paging : {
+    *(.paging)
+}
+```
+Garante que as tabelas estejam alinhadas a 4096 bytes.
+
+### 1.5 Kernel C (kmain) — 64-bit
+
+**Arquivo:** `kernel.c`
+**Compilador:** GCC nativo (Linux) com flags:
+```bash
+gcc -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse -mgeneral-regs-only -Wall -O0
 ```
 
-#### Etapa 5: Habilitar Paginação
-
-```asm
-mov eax, cr0
-or eax, 0x80000001     ; PG (bit 31) + PE (bit 0)
-mov cr0, eax
-```
-
-#### Etapa 6: Far Jump para 64-bit
-
-```asm
-jmp 0x08:_start64       ; Seletor 0x08 = GDT[1] (code 64-bit)
-```
-
-Isso força uma refetch da próxima instrução usando o novo seletor, ativando 64-bit mode.
-
-### 1.3 Kernel (kernel.c) — 64-bit
-
-Agora em 64-bit mode:
-
-```asm
-bits 64
-_start64:
-    ; Carregar seletores de dados
-    mov ax, 0x10        ; Seletor GDT[2]
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-    mov ss, ax
-    
-    ; Configurar stack
-    mov rsp, stack_top
-    
-    ; Restaurar argumentos multiboot2
-    mov rdi, r8         ; magic (argumento 1 para kmain)
-    mov rsi, r9         ; mbi (argumento 2 para kmain)
-    
-    ; Chamar C
-    call kmain
-```
+- `-ffreestanding`: Sem bibliotecas padrão
+- `-nostdlib`: Sem link com libc
+- `-mno-red-zone`: Desabilita red zone (incompatível com kernel)
+- `-mgeneral-regs-only`: Usa apenas registradores gerais (sem SIMD)
+- `-O0`: Sem otimização (debug mais fácil)
 
 ## 2. Drivers: VGA (Modo Texto)
 
 ### 2.1 Framebuffer VGA
 
-O buffer de vídeo em modo texto fica em `0xB8000` (memória física, mapeada):
+Buffer em `0xB8000` (memória física mapeada pela paginação).
 
 ```
-0xB8000: Caractere 0,0 | Atributo (cor) 0,0
-0xB8002: Caractere 0,1 | Atributo (cor) 0,1
-...
-0xB8002 * 80 = 0xB8FA0: Caractere 24,0 | Atributo 24,0 (última linha)
+0xB8000: Caractere (col,lin) | Atributo (cor)
 ```
 
-Total: 80 caracteres × 25 linhas × 2 bytes = 4000 bytes
+Total: 80 × 25 × 2 bytes = 4000 bytes
 
-### 2.2 Formato de Cor
-
-Cada caractere usa 2 bytes:
-
-```
-Byte 0: Caractere ASCII
-Byte 1: Atributo (cor)
-        - Bits 0-3: Cor do texto (0-15)
-        - Bits 4-6: Cor de fundo (0-7)
-        - Bit 7: Intensidade/blink
-```
-
-No MkM usamos:
-```
-Fundo preto (0) + texto verde claro (10)
-= (0 << 4) | 10 = 0x0A por byte
-```
-
-Então quando escrevemos caractere 'A':
-```c
-uint16_t entry = (TEXT_COLOR << 8) | 'A';
-vga_driver.buffer[linha * 80 + col] = entry;
-```
-
-### 2.3 Mover Cursor (portas 0x3D4-0x3D5)
-
-O cursor VGA é controlado via portas I/O:
+### 2.2 Cores
 
 ```c
-uint16_t pos = row * 80 + col;
+#define COLOR (0x0A)  // Fundo preto (0) + Texto verde claro (10)
+```
 
-// Byte high do cursor
-outb(0x3D4, 0x0E);         // Registrador "cursor high byte"
-outb(0x3D5, (pos >> 8) & 0xFF);
+Cada entrada VGA:
+```c
+vga[pos] = (COLOR << 8) | caractere;
+```
 
-// Byte low do cursor
-outb(0x3D4, 0x0F);         // Registrador "cursor low byte"
+### 2.3 Controle do Cursor
+
+```c
+outb(0x3D4, 0x0F);           // Registrador cursor low
 outb(0x3D5, pos & 0xFF);
+outb(0x3D4, 0x0E);           // Registrador cursor high
+outb(0x3D5, (pos >> 8) & 0xFF);
 ```
 
-## 3. Drivers: PS/2 (Teclado)
+### 2.4 Scroll
 
-### 3.1 Portas PS/2
-
+Quando o cursor ultrapassa a linha 24, todo o texto sobe uma linha:
+```c
+for (int i = 0; i < VGA_WIDTH * (VGA_HEIGHT - 1); i++)
+    vga[i] = vga[i + VGA_WIDTH];
+for (int i = VGA_WIDTH * (VGA_HEIGHT - 1); i < VGA_WIDTH * VGA_HEIGHT; i++)
+    vga[i] = (COLOR << 8) | ' ';
 ```
-0x60: Data port (leitura de scancodes)
-0x64: Status port (leitura de flags)
-      - Bit 0 (OBF): Output Buffer Full (dados disponíveis)
-      - Bit 1 (IBF): Input Buffer Full (controladora ocupada)
-```
 
-### 3.2 Ler Scancode
+## 3. Driver PS/2 (Teclado)
+
+### 3.1 Portas I/O
 
 ```c
-// Aguardar dados disponíveis
-while (!(inb(0x64) & 0x01)) {
-    delay_us(100);
-}
-
-// Ler scancode
-uint8_t scancode = inb(0x60);
+#define PS2_DATA   0x60   // Dados (scancode)
+#define PS2_STATUS 0x64   // Status (bit 0 = dados disponíveis)
 ```
 
-### 3.3 Tabela de Scancodes
-
-PS/2 envia scancodes (não ASCII direto):
-
-```
-Scancode 0x1E = 'a'
-Scancode 0x30 = 'b'
-...
-Scancode 0x1C = Enter
-Scancode 0x0E = Backspace
-Scancode 0x2A = Left Shift (pressed)
-Scancode 0xAA = Left Shift (released) = 0x2A | 0x80
-```
-
-Mantemos um array `scancode_table[256]` que mapeia scancodes para ASCII:
+### 3.2 Leitura (Polling)
 
 ```c
-scancode_table[0x1E] = 'a';
-scancode_table[0x30] = 'b';
-// ...
-```
-
-### 3.4 Detecção de Shift
-
-Quando recebemos `0x2A` (shift pressed), setamos flag:
-
-```c
-if (scancode == PS2_LSHIFT) {
-    ps2_shift_pressed = 1;
-    return 0;
+uint8_t ps2_read() {
+    while (!(inb(PS2_STATUS) & 0x01));  // Espera bit 0 = 1
+    return inb(PS2_DATA);               // Lê scancode
 }
 ```
 
-Quando recebemos `0xAA` (shift released):
+### 3.3 Tabela de Scancodes (ASCII)
 
 ```c
-if (scancode == (PS2_LSHIFT | 0x80)) {
-    ps2_shift_pressed = 0;
-    return 0;
-}
+static const char sc_ascii[] = {
+    0,0,'1','2','3','4','5','6','7','8','9','0','-','=',0,
+    0,'q','w','e','r','t','y','u','i','o','p','[',']',0,
+    0,'a','s','d','f','g','h','j','k','l',';',0,0,0,
+    0,'\\','z','x','c','v','b','n','m',',','.','/',0,
+    0,' ',...
+};
 ```
 
-Depois usamos `scancode_table_shift[]` se shift está ativo.
+### 3.4 Teclas Especiais
+
+| Scancode | Significado |
+|----------|-------------|
+| 0x1C | Enter |
+| 0x0E | Backspace |
+| 0x2A | Left Shift (pressionado) |
+| 0xAA | Left Shift (solto) |
+
+**Nota:** Shift ainda não implementado (Fase 2).
 
 ## 4. Parser de Comandos
 
-### 4.1 Buffer de Comando
-
-Mantemos um buffer de até 256 caracteres:
+### 4.1 Buffer de Entrada
 
 ```c
-struct {
-    uint8_t buffer[256];    // String do comando
-    uint32_t length;         // Comprimento atual
-} cmd_buffer;
+char cmd[256];
+int len = 0;
 ```
 
-Enquanto o usuário digita:
-- Caracteres normais: `cmd_buffer_add_char(c)`
-- Backspace: `cmd_buffer_backspace()`
-- Enter: sair do loop, processar `cmd_buffer.buffer`
-
-### 4.2 Parse e Tokenização
-
+Loop de leitura:
 ```c
-const char *ptr = cmd_line;
-char arg_buffer[256];
-const char *argv[16];
-int argc = 0;
-
-while (*ptr && argc < 16) {
-    // Pular espaços
-    while (*ptr == ' ' || *ptr == '\t') ptr++;
-    
-    if (!*ptr) break;
-    
-    // Gravar início do argumento
-    argv[argc++] = ptr;
-    
-    // Avançar até próximo espaço
-    while (*ptr && *ptr != ' ' && *ptr != '\t') ptr++;
-}
-```
-
-Resultado para "echo Ola Mundo":
-```
-argc = 3
-argv[0] = "echo"
-argv[1] = "Ola"
-argv[2] = "Mundo"
-```
-
-### 4.3 Tabela de Comandos (Futura)
-
-Para adicionar novo comando, seria:
-
-```c
-typedef struct {
-    const char *name;
-    void (*handler)(int argc, const char **argv);
-} cmd_t;
-
-cmd_t commands[] = {
-    {"help", cmd_help},
-    {"echo", cmd_echo},
-    {"clear", cmd_clear},
-    {NULL, NULL}
-};
-
-for (int i = 0; commands[i].name; i++) {
-    if (strcmp(argv[0], commands[i].name) == 0) {
-        commands[i].handler(argc, argv);
+while (1) {
+    uint8_t sc = ps2_read();
+    if (sc == 0x1C) {        // Enter
+        cmd[len] = 0;
         break;
+    } else if (sc == 0x0E) { // Backspace
+        if (len > 0) len--;
+    } else if (sc < 128) {
+        char c = sc_ascii[sc];
+        if (c && len < 255) cmd[len++] = c;
     }
 }
 ```
 
-Por enquanto usamos `if/else if` por simplicidade.
+### 4.2 Comandos Implementados
 
-## 5. Alocação de Memória
+| Comando | Função |
+|---------|--------|
+| `help` | Lista comandos disponíveis |
+| `clear` | Limpa a tela |
+| `echo <texto>` | Repete o texto |
+| `about` | Informações do sistema |
+| `shutdown` | Para a CPU (`cli; hlt`) |
 
-### 5.1 Símbolos do Linker
-
-O linker script define símbolos:
-
-```ld
-PROVIDE(_bss_start = .);
-*(.bss)
-PROVIDE(_bss_end = .);
-```
-
-Que podem ser usados em C:
+### 4.3 Comparação de Strings
 
 ```c
-extern char _bss_start, _bss_end;
-uint32_t bss_size = &_bss_end - &_bss_start;
+int strcmp(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return *a - *b;
+}
+
+int strncmp(const char *a, const char *b, int n) {
+    for (int i = 0; i < n; i++) {
+        if (a[i] != b[i]) return a[i] - b[i];
+        if (!a[i]) return 0;
+    }
+    return 0;
+}
 ```
 
-### 5.2 Stack
+## 5. Mapa de Memória
 
-```ld
-section .bss
-    stack_bottom:
-        resb 16384       ; 16KB de stack
-    stack_top:
 ```
-
-Em boot.asm:
-```asm
-mov rsp, stack_top      ; Stack cresce para baixo
-```
-
-### 5.3 Heap (Futuro)
-
-Na Fase 3 adicionaremos um allocador buddy para kmalloc/kfree:
-
-```c
-kmalloc(size)     → aloca do heap
-kfree(ptr)        → libera para heap
+0x00000000 ┌──────────────────────┐
+           │ IVT + BDA (BIOS)     │
+0x00007C00 ├──────────────────────┤
+           │ GRUB (stage 1)       │
+0x00010000 ├──────────────────────┤
+           │ GRUB (stage 2)       │
+0x00100000 ├──────────────────────┤ ← Kernel carregado aqui (1 MB)
+           │ .multiboot (header)  │
+           │ .text (código)       │
+           │ .rodata (strings)    │
+           │ .data (variáveis)    │
+           │ .paging (tabelas)    │
+           │ .bss (não inicial.)  │
+           │ Stack (16 KB)        │
+0x00104000 ├──────────────────────┤
+           │ Livre                │
+0xFFFFFFFF └──────────────────────┘
 ```
 
 ## 6. Fluxo do Terminal Interativo
 
 ```
-while (1) {
-    // Exibir prompt
-    vga_puts("MkM > ");
-    
-    // Limpar buffer
-    cmd_buffer_clear();
-    
-    // Loop de leitura de linha
-    while (1) {
-        scancode = ps2_read_key();      // Bloqueia até tecla
-        ascii = ps2_scancode_to_ascii(scancode);
-        
-        if (ascii == '\n') {
-            vga_putchar('\n');
-            break;                      // Executar
-        } else if (ascii == '\b') {
-            cmd_buffer_backspace();
-            vga_puts("\b \b");          // Apagar na tela
-        } else {
-            cmd_buffer_add_char(ascii);
-            vga_putchar(ascii);         // Echo
-        }
-    }
-    
-    // Executar comando armazenado
-    if (cmd_buffer.length > 0) {
-        execute_command((const char *)cmd_buffer.buffer);
-    }
-}
+kmain()
+  ├─ vga_clear()                    // Limpa tela
+  ├─ vga_puts("MkM Terminal...")   // Mensagem inicial
+  └─ while(1) {
+       ├─ vga_puts("MkM> ")        // Prompt
+       ├─ while(1) {               // Loop de leitura
+       │    sc = ps2_read()         //   Lê scancode
+       │    if (sc == Enter) break  //   Enter → executar
+       │    if (sc == Backspace)    //   Backspace → apagar
+       │    else                    //   Caractere → eco + buffer
+       │  }
+       ├─ if (len == 0) continue   // Linha vazia
+       ├─ strcmp/strncmp           // Comparar comandos
+       └─ executar ação            // help/clear/echo/about/shutdown
+     }
 ```
 
 ## 7. Porquê Estas Escolhas?
 
-### Por que Multiboot2?
+### Por que GRUB + Multiboot2?
+- Funciona no QEMU **e** em hardware real (pendrive bootável)
+- Não depende de PVH ELF Note (problemático no QEMU)
+- GRUB já configura modo protegido 32-bit
+- Padrão da indústria para kernels
 
-- Standard de boot (GRUB, QEMU compatíveis)
-- Não precisa reescrever bootloader para cada plataforma
-- Tags permitem framebuffer, memory map, etc.
-- Será CRUCIAL quando evoluir para boot em máquinas reais
+### Por que Transição Manual para 64-bit?
+- GRUB Multiboot2 não coloca automaticamente em Long Mode
+- Dá controle total sobre GDT e paginação
+- Essencial para entender o hardware
 
-### Por que Paginação Agora?
+### Por que Seção `.paging` Separada?
+- Alinhamento 4096 obrigatório para tabelas
+- Linker script garante posicionamento correto
+- Evita conflitos com outras seções
 
-- Long mode (64-bit) EXIGE paginação
-- Facilita memory protection depois (bits NX, RW, etc.)
-- Identity mapping simplifica agora, permite VA ≠ PA depois
-- Necessário para multitarefa segura
+### Por que `-mgeneral-regs-only`?
+- Evita que o GCC use registradores XMM/SSE
+- Esses registradores exigem salvamento de estado
+- Não estamos prontos para isso na Fase 1
 
-### Por que VGA Texto (não Framebuffer)?
+### Por que Polling (não Interrupções)?
+- Mais simples de implementar
+- Funciona perfeitamente para terminal
+- IDT será adicionada na Fase 2
 
-- Testável em qualquer máquina (legado universal)
-- Simples de implementar (2 bytes por char, não pixels)
-- QEMU simula VGA melhor que framebuffer UEFI
-- Será base para TUI depois
+## 8. Build e Execução
 
-### Por que PS/2 (não USB)?
-
-- PS/2 é barramento serial, mais simples
-- QEMU emula PS/2 por padrão
-- USB é standard moderno, mas mais complexo (118 linhas vs 1000s)
-- Legacy support significa roda em máquinas antigas
-- Será complementado com USB depois
-
-## 8. Limitações Intencionais
-
-### Sem Interrupts
-
-Ainda fazemos polling de teclado (spin loop) em vez de interrupts. Por quê?
-
-- IDT (Interrupt Descriptor Table) adiciona complexidade
-- Polling funciona perfeitamente para input de terminal
-- Interrupts virão na Fase 3 com escalonador
-
-### Sem Proteção de Memória
-
-Tudo roda em Ring 0 (privilégio máximo). Por quê?
-
-- Sem isolamento de processo ainda (Fase 4+)
-- Ring 0 permite I/O direto (necessário para drivers)
-- Proteção virá com paginação avançada
-
-### Sem Sistema de Arquivos
-
-Apenas shell em RAM. Por quê?
-
-- VFS é Fase 6, muito complexo para Fase 1
-- Terminal demonsistra conceitos fundamentais sem FS
-- Depois carregaremos aplicativos via VFS + Mach-O loader
-
-## 9. Otimizações Possíveis (Futuro)
-
-1. **Inline ASM para funções críticas** (VGA putchar, PS/2 read)
-2. **Ring buffer para teclado** (buffer circular de 256 scancodes)
-3. **Cursor piscante** (via timer interrupt a 2Hz)
-4. **Syntax highlighting** (cores diferentes para comandos)
-5. **History de comandos** (buffer de últimas 10 linhas)
-6. **Tab completion** (autocompletar comandos)
-7. **Alias de comandos** (shortcuts customizados)
-
-## 10. Debugging
-
-### Saída Serial
-
-Para debug:
-
-```c
-void serial_putchar(char c) {
-    while ((inb(0x3F8 + 5) & 0x20) == 0);
-    outb(0x3F8, c);
-}
-```
-
-Depois rodar QEMU com:
-```bash
-qemu-system-x86_64 -kernel kernel.elf -serial file:serial.log
-```
-
-### GDB Remote
+### 8.1 Compilação
 
 ```bash
-qemu-system-x86_64 -kernel kernel.elf -s -S
-# Em outro terminal:
-gdb kernel.elf
-target remote localhost:1234
-break kmain
-continue
+# Bootloader
+nasm -f elf64 -o build/boot64.o boot64.asm
+
+# Kernel C
+gcc -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse \
+    -mgeneral-regs-only -Wall -O0 -c -o build/kernel.o kernel.c
+
+# Linkagem
+ld -T linker.ld -o build/kernel.elf build/boot64.o build/kernel.o
 ```
 
-## 11. Transição para Fase 2
+### 8.2 Criação da ISO
 
-A Fase 2 adiciona:
+```bash
+cp build/kernel.elf iso/boot/
+grub-mkrescue -o OvsbMkM.iso iso/
+```
 
-- **Escalonador de tarefas** (round-robin)
-- **Context switching** (salvar/restaurar registradores)
-- **Exceções** (IDT completa)
-- **Tratamento de erros** (#PF para page faults, #UD para inválidas)
-- **Timers** (periódicos para escalonador)
+### 8.3 Execução
 
-Muita da infraestrutura aqui (GDT, paginação, memory layout) será reutilizada.
+```bash
+qemu-system-x86_64 -cdrom OvsbMkM.iso -m 256M
+```
+
+### 8.4 Estrutura de Arquivos (Final)
+
+```
+~/OvsbMkM/
+├── boot64.asm          # Bootloader Multiboot2 + transição 64-bit
+├── kernel.c            # Terminal interativo 64-bit
+├── linker.ld           # Linker script
+├── iso/
+│   └── boot/
+│       └── grub/
+│           └── grub.cfg
+├── build/
+│   ├── boot64.o
+│   ├── kernel.o
+│   └── kernel.elf
+└── OvsbMkM.iso         # ISO bootável final
+```
+
+## 9. Limitações Atuais
+
+1. **Sem IDT** — Exceções causam Triple Fault
+2. **Sem shift** — Apenas letras minúsculas
+3. **Sem sistema de arquivos** — Apenas shell em RAM
+4. **Sem multitarefa** — Único fluxo de execução
+5. **Sem proteção de memória** — Tudo em Ring 0
+
+## 10. Próximos Passos (Fase 2)
+
+- Adicionar IDT para tratamento de exceções
+- Implementar shift para maiúsculas/símbolos
+- Cores no terminal (prompt verde, comandos coloridos)
+- Histórico de comandos (buffer circular)
+- Migrar para `x86_64-elf-gcc` (quando disponível)
 
 ---
 
-**Última atualização:** 2026-06-20
+**Última atualização:** 2026-06-21 — Terminal 64-bit funcional! ✅

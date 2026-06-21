@@ -1,108 +1,68 @@
 # ============================================================================
-# ovsbMicroKernelMac (MkM) - Makefile
-# ============================================================================
-# Arquivo: Makefile
-# Descrição:
-#   - Compila boot.asm (NASM → .o)
-#   - Compila kernel.c (GCC → .o)
-#   - Linka com linker.ld (LD → kernel.elf)
-#   - Cria ISO bootável (GRUB)
-#   - Executa no QEMU
+# ovsbMicroKernelMac (MkM) - Makefile (64-bit, GRUB, ISO)
 # ============================================================================
 
-# ============================================================================
-# TOOLCHAIN
-# ============================================================================
-
-# Assembler (NASM)
 NASM := nasm
-NASM_FLAGS := -felf64 -F dwarf
+NASM_FLAGS := -f elf64
 
-# Compilador C (GCC)
 CC := gcc
-CFLAGS := -ffreestanding -fno-builtin -fno-stack-protector \
-          -nostdlib -mno-red-zone -Wall -Wextra \
-          -O2 -c
+CFLAGS := -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse \
+          -mgeneral-regs-only -Wall -O0 -c
 
-# Linker (GNU LD)
 LD := ld
-LD_FLAGS := -m elf_x86_64 -T kernel/boot/linker.ld --print-gc-sections
+LDFLAGS := -T linker.ld
 
-# QEMU
+GRUB := grub-mkrescue
 QEMU := qemu-system-x86_64
-QEMU_FLAGS := -m 256M -kernel build/kernel.elf -serial stdio -no-reboot
 
-# Diretórios
 BUILD_DIR := build
-KERNEL_DIR := kernel
-OUTPUT := $(BUILD_DIR)/kernel.elf
+ISO_DIR := iso
+ISO := OvsbMkM.iso
 
-# ============================================================================
-# ARCHIVOS FONTE
-# ============================================================================
+BOOT_ASM := boot64.asm
+KERNEL_C := kernel.c
+LINKER := linker.ld
 
-BOOT_ASM := kernel/boot/boot.asm
-KERNEL_C := kernel/core/kernel.c
-
-# Objetos intermediários
-BOOT_OBJ := $(BUILD_DIR)/boot.o
+BOOT_OBJ := $(BUILD_DIR)/boot64.o
 KERNEL_OBJ := $(BUILD_DIR)/kernel.o
+KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 
-# ============================================================================
-# TARGETS
-# ============================================================================
+.PHONY: all iso run clean help
 
-.PHONY: all clean run help
+all: $(KERNEL_ELF)
 
-# Target padrão
-all: $(OUTPUT)
-
-# Compilar boot.asm
 $(BOOT_OBJ): $(BOOT_ASM)
 	@mkdir -p $(BUILD_DIR)
-	@echo "[NASM] Compilando $(BOOT_ASM)..."
+	@echo "[NASM] Compilando bootloader..."
 	$(NASM) $(NASM_FLAGS) -o $@ $<
 
-# Compilar kernel.c
 $(KERNEL_OBJ): $(KERNEL_C)
 	@mkdir -p $(BUILD_DIR)
-	@echo "[GCC] Compilando $(KERNEL_C)..."
+	@echo "[GCC]  Compilando kernel..."
 	$(CC) $(CFLAGS) -o $@ $<
 
-# Linkar em kernel.elf
-$(OUTPUT): $(BOOT_OBJ) $(KERNEL_OBJ)
-	@echo "[LD] Linkando para $(OUTPUT)..."
-	$(LD) $(LD_FLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_OBJ)
-	@echo "[OK] Kernel construído com sucesso: $(OUTPUT)"
-	@ls -lh $(OUTPUT)
+$(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_OBJ) $(LINKER)
+	@echo "[LD]   Linkando..."
+	$(LD) $(LDFLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_OBJ)
+	@echo "[OK]   Kernel: $(KERNEL_ELF)"
 
-# Executar no QEMU
-run: $(OUTPUT)
-	@echo "[QEMU] Inicializando kernel..."
-	$(QEMU) $(QEMU_FLAGS)
+iso: $(KERNEL_ELF)
+	@echo "[ISO]  Criando ISO..."
+	@cp $(KERNEL_ELF) $(ISO_DIR)/boot/
+	@$(GRUB) -o $(ISO) $(ISO_DIR) 2>/dev/null
+	@echo "[OK]   ISO: $(ISO)"
 
-# Limpeza
+run: iso
+	@echo "[QEMU] Iniciando..."
+	$(QEMU) -cdrom $(ISO) -m 256M
+
 clean:
-	@echo "[CLEAN] Removendo artefatos de build..."
-	@rm -rf $(BUILD_DIR)
+	@echo "[CLEAN] Limpando..."
+	@rm -rf $(BUILD_DIR) $(ISO)
 
-# Ajuda
 help:
-	@echo "ovsbMicroKernelMac (MkM) - Build System"
-	@echo ""
-	@echo "Targets:"
-	@echo "  make all   - Compilar kernel (padrão)"
-	@echo "  make run   - Compilar e executar no QEMU"
-	@echo "  make clean - Remover artefatos de build"
-	@echo "  make help  - Mostrar esta mensagem"
-	@echo ""
-	@echo "Exemplos:"
-	@echo "  make           # Apenas compilar"
-	@echo "  make run       # Compilar e executar"
-	@echo "  make clean all # Limpar e recompilar tudo"
-	@echo ""
-	@echo "Requisitos:"
-	@echo "  - NASM (assembler)"
-	@echo "  - GCC (compilador C)"
-	@echo "  - GNU LD (linker)"
-	@echo "  - QEMU (emulador)"
+	@echo "OvsbMkM - Build System (64-bit)"
+	@echo "  make        Compila kernel"
+	@echo "  make iso    Cria ISO"
+	@echo "  make run    Compila + ISO + QEMU"
+	@echo "  make clean  Limpa tudo"
