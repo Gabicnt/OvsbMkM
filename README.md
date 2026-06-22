@@ -1,3 +1,32 @@
+# OvsbMkM
+
+Status: Work-in-progress kernel prototype (64-bit). Key subsystems implemented:
+- Basic VGA terminal
+- PS/2 keyboard driver and IRQ handling
+- Basic IDT and PIC initialization
+- Minimal syscall handler and stubs
+- Simple memory manager and Mach-O loader prototype
+
+Build & Run
+
+```
+make clean && make
+make run    # boots in QEMU
+```
+
+Project layout
+
+- `src/kernel/` — kernel sources (memory, mach_o, smc, nvram, pic)
+- `src/drivers/` — drivers (keyboard)
+- `boot64.asm`, `linker.ld`, `idt.*`, `syscall_entry.asm`, `Makefile`
+
+Next steps
+
+- Replace `test_macho` with a real Mach-O blob and improve loader
+- Implement more BSD syscalls and process execution
+- Add VFS and userspace support
+
+If you want a clean commit, review changes and then run `git add . && git commit -m "Cleanup and docs"`.
 # ovsbMicroKernelMac (MkM) - Fase 1: Terminal Interativo 64-bit
 
 **Versão:** 0.10.0  

@@ -1,68 +1,73 @@
-# ============================================================================
-# ovsbMicroKernelMac (MkM) - Makefile (64-bit, GRUB, ISO)
-# ============================================================================
-
-NASM := nasm
-NASM_FLAGS := -f elf64
-
 CC := gcc
-CFLAGS := -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse \
-          -mgeneral-regs-only -Wall -O0 -c
-
-LD := ld
-LDFLAGS := -T linker.ld
-
+NASM := nasm
 GRUB := grub-mkrescue
 QEMU := qemu-system-x86_64
 
 BUILD_DIR := build
-ISO_DIR := iso
+ISO_DIR := iso/boot
 ISO := OvsbMkM.iso
 
-BOOT_ASM := boot64.asm
-KERNEL_C := kernel.c
-LINKER := linker.ld
+CFLAGS := -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse -mgeneral-regs-only -Wall -O0 -I src/kernel -I src/drivers -I .
+NASM_FLAGS := -f elf64
+LDFLAGS := -T src/kernel/linker.ld
 
-BOOT_OBJ := $(BUILD_DIR)/boot64.o
-KERNEL_OBJ := $(BUILD_DIR)/kernel.o
-KERNEL_ELF := $(BUILD_DIR)/kernel.elf
+SRCS := \
+    src/kernel/kernel.c \
+    src/kernel/syscall.c \
+    src/kernel/idt.c \
+    src/kernel/test_idt.c \
+    src/kernel/memory.c \
+    src/kernel/mach_o.c \
+    src/kernel/smc.c \
+    src/kernel/nvram.c \
+    src/kernel/test_macho.c
 
-.PHONY: all iso run clean help
+SRCS += src/drivers/keyboard.c
+SRCS += src/kernel/pic.c
 
-all: $(KERNEL_ELF)
+OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 
-$(BOOT_OBJ): $(BOOT_ASM)
-	@mkdir -p $(BUILD_DIR)
-	@echo "[NASM] Compilando bootloader..."
+.PHONY: all iso run clean
+
+all: $(BUILD_DIR)/kernel.elf
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/boot64.o: src/kernel/boot64.asm | $(BUILD_DIR)
 	$(NASM) $(NASM_FLAGS) -o $@ $<
 
-$(KERNEL_OBJ): $(KERNEL_C)
-	@mkdir -p $(BUILD_DIR)
-	@echo "[GCC]  Compilando kernel..."
-	$(CC) $(CFLAGS) -o $@ $<
+IDT_ASM := src/kernel/idt.asm
+IDT_OBJ := $(BUILD_DIR)/idt_asm.o
 
-$(KERNEL_ELF): $(BOOT_OBJ) $(KERNEL_OBJ) $(LINKER)
-	@echo "[LD]   Linkando..."
-	$(LD) $(LDFLAGS) -o $@ $(BOOT_OBJ) $(KERNEL_OBJ)
-	@echo "[OK]   Kernel: $(KERNEL_ELF)"
+$(IDT_OBJ): $(IDT_ASM) | $(BUILD_DIR)
+	$(NASM) -f elf64 -o $@ $<
 
-iso: $(KERNEL_ELF)
-	@echo "[ISO]  Criando ISO..."
-	@cp $(KERNEL_ELF) $(ISO_DIR)/boot/
-	@$(GRUB) -o $(ISO) $(ISO_DIR) 2>/dev/null
-	@echo "[OK]   ISO: $(ISO)"
+SYSCALL_ASM := src/kernel/syscall_entry.asm
+SYSCALL_OBJ := $(BUILD_DIR)/syscall_entry.o
+$(SYSCALL_OBJ): $(SYSCALL_ASM) | $(BUILD_DIR)
+	$(NASM) -f elf64 -o $@ $<
+
+KEYBOARD_ASM := src/drivers/keyboard_asm.asm
+KEYBOARD_OBJ := $(BUILD_DIR)/keyboard_asm.o
+$(KEYBOARD_OBJ): $(KEYBOARD_ASM) | $(BUILD_DIR)
+	$(NASM) -f elf64 -o $@ $<
+
+
+$(BUILD_DIR)/kernel.elf: $(BUILD_DIR)/boot64.o $(IDT_OBJ) $(SYSCALL_OBJ) $(KEYBOARD_OBJ) $(OBJS) src/kernel/linker.ld | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -nostdlib -no-pie -o $@ $(BUILD_DIR)/boot64.o $(IDT_OBJ) $(SYSCALL_OBJ) $(KEYBOARD_OBJ) $(OBJS) -Wl,$(LDFLAGS)
+
+iso: $(BUILD_DIR)/kernel.elf
+	mkdir -p $(ISO_DIR)
+	cp $(BUILD_DIR)/kernel.elf $(ISO_DIR)/kernel.elf
+	$(GRUB) -o $(ISO) iso 2>/dev/null || true
 
 run: iso
-	@echo "[QEMU] Iniciando..."
 	$(QEMU) -cdrom $(ISO) -m 256M
 
 clean:
-	@echo "[CLEAN] Limpando..."
-	@rm -rf $(BUILD_DIR) $(ISO)
-
-help:
-	@echo "OvsbMkM - Build System (64-bit)"
-	@echo "  make        Compila kernel"
-	@echo "  make iso    Cria ISO"
-	@echo "  make run    Compila + ISO + QEMU"
-	@echo "  make clean  Limpa tudo"
+	rm -rf $(BUILD_DIR) $(ISO)
